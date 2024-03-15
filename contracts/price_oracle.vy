@@ -4,8 +4,7 @@
 """
 @title CryptoFromPool
 @notice Price oracle for pools which contain cryptos and crvUSD. This is NOT suitable for minted crvUSD - only for lent out
-@author Curve.Fi
-@license MIT
+@author Volume Finance
 """
 interface Pool:
     def price_oracle(i: uint256 = 0) -> uint256: view  # Universal method!
