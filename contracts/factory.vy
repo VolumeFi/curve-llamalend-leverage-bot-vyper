@@ -28,9 +28,11 @@ struct BotInfo:
     interval: uint256
 
 interface ControllerFactory:
-    def get_controller(collateral: address) -> address: view
+    def token_to_vaults(token0: address, idx: uint256) -> address: view
     def stablecoin() -> address: view
-    def WETH() -> address: view
+
+interface Vault:
+    def controller() -> address: view
 
 interface ERC20:
     def approve(_spender: address, _value: uint256) -> bool: nonpayable
@@ -124,7 +126,7 @@ bot_info: public(HashMap[uint256, BotInfo])
 last_deposit_id: public(uint256)
 
 @external
-def __init__(_blueprint: address, _compass: address, controller_factory: address, router: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
+def __init__(_blueprint: address, _compass: address, controller_factory: address, weth: address, router: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
     self.blueprint = _blueprint
     self.compass = _compass
     self.refund_wallet = _refund_wallet
@@ -133,7 +135,7 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
     self.service_fee = _service_fee
     CONTROLLER_FACTORY = controller_factory
     ROUTER = router
-    WETH = ControllerFactory(controller_factory).WETH()
+    WETH = weth
     STABLECOIN = ControllerFactory(CONTROLLER_FACTORY).stablecoin()
     log UpdateCompass(empty(address), _compass)
     log UpdateBlueprint(empty(address), _blueprint)
@@ -148,7 +150,6 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
 def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], leverage: uint256, deleverage_percentage: uint256, health_threshold: uint256, expire: uint256, number_trades: uint256, interval: uint256):
     _gas_fee: uint256 = self.gas_fee * number_trades
     _service_fee: uint256 = self.service_fee
-    controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
     collateral_amount: uint256 = 0
     _value: uint256 = msg.value
     for swap_info in swap_infos:
@@ -220,7 +221,8 @@ def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, de
 @internal
 def _create_bot(deposit_id: uint256, depositor: address, collateral: address, amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], leverage: uint256, deleverage_percentage: uint256, health_threshold: uint256, expire: uint256, remaining_count: uint256, interval: uint256):
     _service_fee: uint256 = self.service_fee
-    controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
+    vault: address = ControllerFactory(CONTROLLER_FACTORY).token_to_vaults(collateral, 0)
+    controller: address = Vault(vault).controller()
     bot: address = empty(address)
     if amount > 0:
         if collateral == WETH:
