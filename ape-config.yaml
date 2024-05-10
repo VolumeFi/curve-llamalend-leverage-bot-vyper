@@ -1,1 +1,6 @@
 name: curve-llamalend-leverage-bot-vyper
+
+geth:
+  arbitrum:
+    mainnet:
+      uri: https://arb1.arbitrum.io/rpc/

@@ -29,7 +29,7 @@ struct BotInfo:
 
 interface ControllerFactory:
     def token_to_vaults(token0: address, idx: uint256) -> address: view
-    def stablecoin() -> address: view
+    def STABLECOIN() -> address: view
 
 interface Vault:
     def controller() -> address: view
@@ -40,10 +40,12 @@ interface ERC20:
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
 interface WrappedEth:
+    def deposit(): payable
     def withdraw(amount: uint256): nonpayable
 
 interface Bot:
     def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5]): nonpayable
+    def borrow_more_extended(collateral_amount: uint256, debt: uint256, callbacker: address, callback_args: DynArray[uint256, 5]): nonpayable
     def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]) -> uint256: nonpayable
     def state() -> uint256[4]: view
     def health() -> int256: view
@@ -59,6 +61,23 @@ interface CurveSwapRouter:
     ) -> uint256: payable
 
 event BotStarted:
+    deposit_id: uint256
+    owner: address
+    bot: address
+    collateral: address
+    collateral_amount: uint256
+    debt: uint256
+    N: uint256
+    leverage: uint256
+    deleverage_percentage: uint256
+    health_threshold: uint256
+    expire: uint256
+    callbacker: address
+    callback_args: DynArray[uint256, 5]
+    remaining_count: uint256
+    interval: uint256
+
+event BotAdded:
     deposit_id: uint256
     owner: address
     bot: address
@@ -117,6 +136,7 @@ STABLECOIN: immutable(address)
 blueprint: public(address)
 compass: public(address)
 bot_to_owner: public(HashMap[address, address])
+owner_to_bot: public(HashMap[address, HashMap[address, address]])
 refund_wallet: public(address)
 gas_fee: public(uint256)
 service_fee_collector: public(address)
@@ -136,7 +156,7 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
     CONTROLLER_FACTORY = controller_factory
     ROUTER = router
     WETH = weth
-    STABLECOIN = ControllerFactory(CONTROLLER_FACTORY).stablecoin()
+    STABLECOIN = ControllerFactory(CONTROLLER_FACTORY).STABLECOIN()
     log UpdateCompass(empty(address), _compass)
     log UpdateBlueprint(empty(address), _blueprint)
     log UpdateRefundWallet(empty(address), _refund_wallet)
@@ -223,16 +243,23 @@ def _create_bot(deposit_id: uint256, depositor: address, collateral: address, am
     _service_fee: uint256 = self.service_fee
     vault: address = ControllerFactory(CONTROLLER_FACTORY).token_to_vaults(collateral, 0)
     controller: address = Vault(vault).controller()
-    bot: address = empty(address)
+    bot: address = self.owner_to_bot[depositor][collateral]
     if amount > 0:
-        if collateral == WETH:
-            bot = create_from_blueprint(self.blueprint, controller, WETH, depositor, collateral, STABLECOIN, value=amount, code_offset=3)
-        else:
+        if bot == empty(address):
+            if collateral == WETH:
+                WrappedEth(WETH).deposit(value=amount)
             bot = create_from_blueprint(self.blueprint, controller, WETH, depositor, collateral, STABLECOIN, code_offset=3)
             assert ERC20(collateral).transfer(bot, amount, default_return_value=True), "Tr fail"
-        Bot(bot).create_loan_extended(amount, debt, N, callbacker, callback_args)
-        self.bot_to_owner[bot] = depositor
-        log BotStarted(deposit_id, depositor, bot, collateral, amount, debt, N, leverage, deleverage_percentage, health_threshold, expire, callbacker, callback_args, remaining_count, interval)
+            Bot(bot).create_loan_extended(amount, debt, N, callbacker, callback_args)
+            self.bot_to_owner[bot] = depositor
+            self.owner_to_bot[depositor][collateral] = bot
+            log BotStarted(deposit_id, depositor, bot, collateral, amount, debt, N, leverage, deleverage_percentage, health_threshold, expire, callbacker, callback_args, remaining_count, interval)
+        else:
+            if collateral == WETH:
+                WrappedEth(WETH).deposit(value=amount)
+            assert ERC20(collateral).transfer(bot, amount, default_return_value=True), "Tr fail"
+            Bot(bot).borrow_more_extended(amount, debt, callbacker, callback_args)
+            log BotAdded(deposit_id, depositor, bot, collateral, amount, debt, N, leverage, deleverage_percentage, health_threshold, expire, callbacker, callback_args, remaining_count, interval)
 
 @external
 def create_next_bot(deposit_id: uint256, callbacker: address, callback_args: DynArray[uint256,5], remaining_count: uint256):
@@ -247,7 +274,7 @@ def create_next_bot(deposit_id: uint256, callbacker: address, callback_args: Dyn
 def repay_bot(bots: DynArray[address, MAX_SIZE], callbackers: DynArray[address, MAX_SIZE], callback_args: DynArray[DynArray[uint256,5], MAX_SIZE]):
     assert len(bots) == len(callbackers) and len(bots) == len(callback_args), "invalidate"
     if msg.sender == self.compass:
-        assert convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32) == self.paloma, "Unauthorized"
+        assert convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32) == self.paloma, "Invalid paloma"
         for i in range(MAX_SIZE):
             if i >= len(bots):
                 break
