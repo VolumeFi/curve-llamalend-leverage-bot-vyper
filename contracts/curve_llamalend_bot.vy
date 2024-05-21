@@ -8,9 +8,9 @@
 """
 
 interface Controller:
-    def create_loan_extended(collateral: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5]): payable
-    def borrow_more_extended(collateral: uint256, debt: uint256, callbacker: address, callback_args: DynArray[uint256,5]): nonpayable
-    def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]): nonpayable
+    def create_loan_extended(collateral: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4]=b""): payable
+    def borrow_more_extended(collateral: uint256, debt: uint256, callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4]=b""): nonpayable
+    def repay_extended(callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4]=b""): nonpayable
     def user_state(user: address) -> uint256[4]: view
     def health(user: address, full: bool) -> int256: view
 
@@ -28,38 +28,69 @@ COLLATERAL: immutable(address)
 WETH: immutable(address)
 OWNER: immutable(address)
 STABLECOIN: immutable(address)
+callback_bytes: public(Bytes[10**4])
+is_new_market: public(bool)
 
 @external
 @payable
-def __init__(controller: address, weth: address, owner: address, collateral: address, stablecoin: address):
+def __init__(controller: address, weth: address, owner: address, collateral: address, stablecoin: address, is_new_market: bool):
     FACTORY = msg.sender
     CONTROLLER = controller
     COLLATERAL = collateral
     WETH = weth
     OWNER = owner
     STABLECOIN = stablecoin
+    self.is_new_market = is_new_market
 
-@external
-def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5]):
+@internal
+def _factory_check():
     assert msg.sender == FACTORY, "not factory"
-    assert ERC20(COLLATERAL).approve(CONTROLLER, collateral_amount, default_return_value=True), "Failed approve"
-    Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args)
+
+@internal
+def _safe_approve(_token: address, _to: address, _value: uint256):
+    assert ERC20(_token).approve(_to, _value, default_return_value=True), "Failed approve"
 
 @external
-def borrow_more_extended(collateral_amount: uint256, debt: uint256, callbacker: address, callback_args: DynArray[uint256, 5]):
-    assert msg.sender == FACTORY, "not factory"
-    assert ERC20(COLLATERAL).approve(CONTROLLER, collateral_amount, default_return_value=True), "Failed approve"
-    Controller(CONTROLLER).borrow_more_extended(collateral_amount, debt, callbacker, callback_args)
+def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4]):
+    self._factory_check()
+    self._safe_approve(COLLATERAL, CONTROLLER, collateral_amount)
+    if self.is_new_market:
+        Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args, callback_bytes)
+    else:
+        self.callback_bytes = callback_bytes
+        Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args)
+        self.callback_bytes = b""
 
 @external
-def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]) -> uint256:
-    assert msg.sender == FACTORY, "Unauthorized"
+def borrow_more_extended(collateral_amount: uint256, debt: uint256, callbacker: address, callback_args: DynArray[uint256, 5], callback_bytes: Bytes[10**4]):
+    self._factory_check()
+    self._safe_approve(COLLATERAL, CONTROLLER, collateral_amount)
+    if self.is_new_market:
+        Controller(CONTROLLER).borrow_more_extended(collateral_amount, debt, callbacker, callback_args, callback_bytes)
+    else:
+        self.callback_bytes = callback_bytes
+        Controller(CONTROLLER).borrow_more_extended(collateral_amount, debt, callbacker, callback_args)
+        self.callback_bytes = b""
+
+@external
+def repay_extended(callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4]) -> uint256:
+    self._factory_check()
     bal: uint256 = ERC20(STABLECOIN).balanceOf(self)
-    Controller(CONTROLLER).repay_extended(callbacker, callback_args)
+    if self.is_new_market:
+        Controller(CONTROLLER).repay_extended(callbacker, callback_args, callback_bytes)
+    else:
+        self.callback_bytes = callback_bytes
+        Controller(CONTROLLER).repay_extended(callbacker, callback_args)
+        self.callback_bytes = b""
     bal = unsafe_sub(ERC20(STABLECOIN).balanceOf(self), bal)
     assert bal > 0, "repay fail"
-    assert ERC20(STABLECOIN).transfer(OWNER, bal, default_return_value=True), "Tr fail"
+    assert ERC20(STABLECOIN).transfer(OWNER, bal, default_return_value=True), "Failed transfer"
     return bal
+
+@external
+def set_new_market(is_new_market: bool):
+    self._factory_check()
+    self.is_new_market = is_new_market
 
 @external
 @view
