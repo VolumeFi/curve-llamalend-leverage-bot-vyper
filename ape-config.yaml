@@ -4,3 +4,8 @@ geth:
   arbitrum:
     mainnet:
       uri: https://arb1.arbitrum.io/rpc/
+hardhat:
+  fork:
+    ethereum:
+      mainnet:
+        upstream_provider: infura
