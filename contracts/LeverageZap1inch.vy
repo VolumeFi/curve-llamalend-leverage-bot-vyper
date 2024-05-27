@@ -2,8 +2,8 @@
 
 """
 @title LlamaLend and crvUSD leverage zap (using 1inch)
-@author Curve.Fi
-@license Copyright (c) Curve.Fi, 2020-2024 - all rights reserved
+@author Volume Finance
+@license Copyright (c) Volume Finance, 2020-2024 - all rights reserved
 @notice Creates leverage on crvUSD via 1inch Router. Does calculations for leverage.
 """
 
@@ -313,6 +313,7 @@ def callback_deposit(user: address, stablecoins: uint256, user_collateral: uint2
             is_static_call=True,
             revert_on_failure=False
         )
+        _callback_bytes = _abi_decode(_callback_bytes, Bytes[10 ** 4 - 80])
         if not success:
             _callback_bytes = b""
     else:
@@ -365,6 +366,7 @@ def callback_repay(user: address, stablecoins: uint256, collateral: uint256, deb
             is_static_call=True,
             revert_on_failure=False
         )
+        _callback_bytes = _abi_decode(_callback_bytes, Bytes[10 ** 4 - 80])
         if not success:
             _callback_bytes = b""
     else:
@@ -392,5 +394,5 @@ def callback_repay(user: address, stablecoins: uint256, collateral: uint256, deb
     self._transferFrom(borrowed_token, user, self, user_borrowed)
 
     log Repay(user, state_collateral_used, borrowed_from_state_collateral, user_collateral, user_collateral_used, borrowed_from_user_collateral, user_borrowed)
-
+    
     return [borrowed_from_state_collateral + borrowed_from_user_collateral + user_borrowed, remaining_collateral]
