@@ -282,7 +282,10 @@ def _create_bot(deposit_id: uint256, depositor: address, collateral: address, am
             if collateral == WETH:
                 WrappedEth(WETH).deposit(value=amount)
             self._safe_transfer(collateral, bot, amount)
-            Bot(bot).borrow_more_extended(amount, debt, callbacker, callback_args, callback_bytes)
+            if Bot(bot).state()[3] == 0:
+                Bot(bot).create_loan_extended(amount, debt, N, callbacker, callback_args, callback_bytes)
+            else:
+                Bot(bot).borrow_more_extended(amount, debt, callbacker, callback_args, callback_bytes)
             log BotAdded(deposit_id, depositor, bot, collateral, amount, debt, N, leverage, deleverage_percentage, health_threshold, expire, callbacker, callback_args, remaining_count, interval)
 
 @internal
