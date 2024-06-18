@@ -50,6 +50,10 @@ def _factory_check():
 def _safe_approve(_token: address, _to: address, _value: uint256):
     assert ERC20(_token).approve(_to, _value, default_return_value=True), "Failed approve"
 
+@internal
+def _safe_transfer(_token: address, _to: address, _value: uint256):
+    assert ERC20(_token).transfer(_to, _value, default_return_value=True), "Failed transfer"
+
 @external
 def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4]):
     self._factory_check()
@@ -83,9 +87,17 @@ def repay_extended(callbacker: address, callback_args: DynArray[uint256,5], call
         Controller(CONTROLLER).repay_extended(callbacker, callback_args)
         self.callback_bytes = b""
     bal = unsafe_sub(ERC20(STABLECOIN).balanceOf(self), bal)
-    assert bal > 0, "repay fail"
-    assert ERC20(STABLECOIN).transfer(OWNER, bal, default_return_value=True), "Failed transfer"
+    if bal > 0:
+        self._safe_transfer(STABLECOIN, OWNER, bal)
     return bal
+
+@external
+@nonreentrant('lock')
+def emergency_withdraw(token: address, amount: uint256):
+    if token == empty(address):
+        send(OWNER, amount)
+    else:
+        self._safe_transfer(token, OWNER, amount)
 
 @external
 def set_new_market(is_new_market: bool):

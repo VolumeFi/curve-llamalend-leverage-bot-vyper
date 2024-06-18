@@ -268,6 +268,11 @@ def _create_bot(deposit_id: uint256, depositor: address, collateral: address, am
     vault: address = ControllerFactory(CONTROLLER_FACTORY).token_to_vaults(collateral, 0)
     controller: address = Vault(vault).controller()
     bot: address = self.owner_to_bot[depositor][collateral]
+    if bot != empty(address):
+        if Bot(bot).health() < 0:
+            bot = empty(address)
+        else:
+            assert Bot(bot).state()[1] == 0, "In Soft liquidation. Full Repay instead"
     if amount > 0:
         if bot == empty(address):
             if collateral == WETH:
