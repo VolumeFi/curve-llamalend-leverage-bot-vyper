@@ -23,7 +23,7 @@ interface ERC20:
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
 
 FACTORY: immutable(address)
-CONTROLLER: immutable(address)
+CONTROLLER: public(immutable(address))
 COLLATERAL: immutable(address)
 WETH: immutable(address)
 OWNER: immutable(address)
