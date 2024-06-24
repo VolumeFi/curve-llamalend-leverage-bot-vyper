@@ -27,6 +27,7 @@ struct BotInfo:
     remaining_count: uint256
     interval: uint256
     is_new_market: bool
+    controller_idx: uint256
 
 interface ControllerFactory:
     def token_to_vaults(token0: address, idx: uint256) -> address: view
@@ -188,7 +189,7 @@ def _safe_transfer_from(_token: address, _from: address, _to: address, _value: u
 @external
 @payable
 @nonreentrant('lock')
-def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4], is_new_market: bool, leverage: uint256, deleverage_percentage: uint256, health_threshold: uint256, expire: uint256, number_trades: uint256, interval: uint256):
+def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4], is_new_market: bool, leverage: uint256, deleverage_percentage: uint256, health_threshold: uint256, expire: uint256, number_trades: uint256, interval: uint256, controller_idx: uint256=0, delegate: address=msg.sender):
     _gas_fee: uint256 = self.gas_fee * number_trades
     _service_fee: uint256 = self.service_fee
     collateral_amount: uint256 = 0
@@ -244,7 +245,7 @@ def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, de
     _amount: uint256 = unsafe_div(collateral_amount, number_trades)
     if number_trades > 1:
         self.bot_info[_deposit_id] = BotInfo({
-            depositor: msg.sender,
+            depositor: delegate,
             collateral: collateral,
             amount: _amount,
             debt: debt,
@@ -255,17 +256,18 @@ def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, de
             expire: expire,
             remaining_count: unsafe_sub(number_trades, 1),
             interval: interval,
-            is_new_market: is_new_market
+            is_new_market: is_new_market,
+            controller_idx: controller_idx
         })
-        self.remaining_funds[msg.sender][collateral] +=  unsafe_sub(collateral_amount, _amount)
+        self.remaining_funds[delegate][collateral] +=  unsafe_sub(collateral_amount, _amount)
     else:
         assert number_trades == 1, "Wrong number trades"
-    self._create_bot(_deposit_id, msg.sender, collateral, unsafe_div(collateral_amount, number_trades), debt, N, callbacker, callback_args, callback_bytes, is_new_market, leverage, deleverage_percentage, health_threshold, expire, number_trades, interval)
+    self._create_bot(_deposit_id, delegate, collateral, unsafe_div(collateral_amount, number_trades), debt, N, callbacker, callback_args, callback_bytes, is_new_market, leverage, deleverage_percentage, health_threshold, expire, number_trades, interval, controller_idx)
 
 @internal
-def _create_bot(deposit_id: uint256, depositor: address, collateral: address, amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4], is_new_market: bool, leverage: uint256, deleverage_percentage: uint256, health_threshold: uint256, expire: uint256, remaining_count: uint256, interval: uint256):
+def _create_bot(deposit_id: uint256, depositor: address, collateral: address, amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4], is_new_market: bool, leverage: uint256, deleverage_percentage: uint256, health_threshold: uint256, expire: uint256, remaining_count: uint256, interval: uint256, controller_idx: uint256):
     _service_fee: uint256 = self.service_fee
-    vault: address = ControllerFactory(CONTROLLER_FACTORY).token_to_vaults(collateral, 0)
+    vault: address = ControllerFactory(CONTROLLER_FACTORY).token_to_vaults(collateral, controller_idx)
     controller: address = Vault(vault).controller()
     bot: address = self.owner_to_bot[depositor][collateral]
     if bot != empty(address):
@@ -304,7 +306,7 @@ def create_next_bot(deposit_id: uint256, callbacker: address, callback_args: Dyn
     _bot_info: BotInfo = self.bot_info[deposit_id]
     assert _bot_info.remaining_count == remaining_count and remaining_count > 0, "Wrong count"
     self.remaining_funds[_bot_info.depositor][_bot_info.collateral] -= _bot_info.amount
-    self._create_bot(deposit_id, _bot_info.depositor, _bot_info.collateral, _bot_info.amount, _bot_info.debt, _bot_info.N, callbacker, callback_args, callback_bytes, _bot_info.is_new_market, _bot_info.leverage, _bot_info.deleverage_percentage, _bot_info.health_threshold, _bot_info.expire, remaining_count, _bot_info.interval)
+    self._create_bot(deposit_id, _bot_info.depositor, _bot_info.collateral, _bot_info.amount, _bot_info.debt, _bot_info.N, callbacker, callback_args, callback_bytes, _bot_info.is_new_market, _bot_info.leverage, _bot_info.deleverage_percentage, _bot_info.health_threshold, _bot_info.expire, remaining_count, _bot_info.interval, _bot_info.controller_idx)
     self.bot_info[deposit_id].remaining_count = unsafe_sub(remaining_count, 1)
 
 @external
