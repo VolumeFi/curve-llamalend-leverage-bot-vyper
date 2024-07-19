@@ -49,6 +49,7 @@ interface Bot:
     def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4]): nonpayable
     def borrow_more_extended(collateral_amount: uint256, debt: uint256, callbacker: address, callback_args: DynArray[uint256, 5], callback_bytes: Bytes[10**4]): nonpayable
     def repay_extended(callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4]) -> uint256: nonpayable
+    def liquidate_extended(min_x: uint256, callbacker: address, callback_args: DynArray[uint256,5]) -> (uint256, uint256): nonpayable
     def set_new_market(is_new_market: bool): nonpayable
     def state() -> uint256[4]: view
     def health() -> int256: view
@@ -106,6 +107,12 @@ event BotRepayed:
     owner: address
     bot: address
     return_amount: uint256
+
+event BotLiquidated:
+    owner: address
+    bot: address
+    stablecoin_amount: uint256
+    collateral_amount: uint256
 
 event UpdateBlueprint:
     old_blueprint: address
@@ -340,6 +347,19 @@ def cancel_pending_bot(collateral: address, collateral_amount: uint256):
     else:
         self._safe_transfer(collateral, msg.sender, collateral_amount)
     log CancelPendingBot(msg.sender, collateral, collateral_amount)
+
+@external
+@nonreentrant('lock')
+def liquidate_bot(bot: address, min_x: uint256, callbacker: address, callback_args: DynArray[uint256, 5]):
+    owner: address = self.bot_to_owner[bot]
+    if msg.sender == self.compass:
+        assert convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32) == self.paloma, "Unauthorized"
+    else:
+        assert owner == msg.sender, "Unauthorized"
+    bal0: uint256 = 0
+    bal1: uint256 = 0
+    bal0, bal1 = Bot(bot).liquidate_extended(min_x, callbacker, callback_args)
+    log BotLiquidated(owner, bot, bal0, bal1)
 
 @external
 def set_new_market(bot: address, is_new_market: bool):

@@ -11,6 +11,7 @@ interface Controller:
     def create_loan_extended(collateral: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4]=b""): payable
     def borrow_more_extended(collateral: uint256, debt: uint256, callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4]=b""): nonpayable
     def repay_extended(callbacker: address, callback_args: DynArray[uint256,5], callback_bytes: Bytes[10**4]=b""): nonpayable
+    def liquidate_extended(user: address, min_x: uint256, frac: uint256, use_eth: bool, callbacker: address, callback_args: DynArray[uint256,5]): nonpayable
     def user_state(user: address) -> uint256[4]: view
     def health(user: address, full: bool) -> int256: view
 
@@ -90,6 +91,28 @@ def repay_extended(callbacker: address, callback_args: DynArray[uint256,5], call
     if bal > 0:
         self._safe_transfer(STABLECOIN, OWNER, bal)
     return bal
+
+
+@external
+def liquidate_extended(min_x: uint256, callbacker: address, callback_args: DynArray[uint256,5]) -> (uint256, uint256):
+    assert msg.sender == FACTORY, "Unauthorized"
+    use_eth: bool = False
+    if COLLATERAL == WETH:
+        use_eth = True
+    bal0: uint256 = ERC20(STABLECOIN).balanceOf(self)
+    bal1: uint256 = ERC20(COLLATERAL).balanceOf(self)
+    Controller(CONTROLLER).liquidate_extended(self, min_x, 10 ** 18, use_eth, callbacker, callback_args)
+    bal0 = unsafe_sub(ERC20(STABLECOIN).balanceOf(self), bal0)
+    bal1 = unsafe_sub(ERC20(COLLATERAL).balanceOf(self), bal1)
+    if bal0 > 0:
+        self._safe_transfer(STABLECOIN, OWNER, bal0)
+    if bal1 > 0:
+        if COLLATERAL == WETH:
+            WrappedEth(WETH).withdraw(bal1)
+            send(OWNER, bal1)
+        else:
+            self._safe_transfer(COLLATERAL, OWNER, bal1)
+    return bal0, bal1
 
 @external
 @nonreentrant('lock')
