@@ -49,6 +49,14 @@ event Repay:
     borrowed_from_user_collateral: uint256
     user_borrowed: uint256
 
+event Liquidate:
+    user: indexed(address)
+    state_collateral_used: uint256
+    borrowed_from_state_collateral: uint256
+    user_collateral: uint256
+    user_collateral_used: uint256
+    borrowed_from_user_collateral: uint256
+    user_borrowed: uint256
 
 DEAD_SHARES: constant(uint256) = 1000
 MAX_TICKS_UINT: constant(uint256) = 50
@@ -333,7 +341,7 @@ def callback_deposit(user: address, stablecoins: uint256, user_collateral: uint2
 def callback_repay(user: address, stablecoins: uint256, collateral: uint256, debt: uint256,
                    callback_args: DynArray[uint256,10], callback_bytes: Bytes[10 ** 4] = b"") -> uint256[2]:
     """
-    @notice Callback method which should be called by controller to create leveraged position
+    @notice Callback method which should be called by controller to repay leveraged position
     @param user Address of the user
     @param stablecoins The value from user_state
     @param collateral The value from user_state
@@ -396,3 +404,59 @@ def callback_repay(user: address, stablecoins: uint256, collateral: uint256, deb
     log Repay(user, state_collateral_used, borrowed_from_state_collateral, user_collateral, user_collateral_used, borrowed_from_user_collateral, user_borrowed)
     
     return [borrowed_from_state_collateral + borrowed_from_user_collateral + user_borrowed, remaining_collateral]
+
+@external
+@nonreentrant('lock')
+def callback_liquidate(user: address, stablecoins: uint256, collateral: uint256, debt: uint256,
+                   callback_args: DynArray[uint256,10], callback_bytes: Bytes[10 ** 4] = b"") -> uint256[2]:
+    """
+    @notice Callback method which should be called by controller to liquidate leveraged position
+    @param user Address of the user
+    @param stablecoins The value from user_state
+    @param collateral The value from user_state
+    @param debt The value from user_state
+    @param callback_args [factory_id, controller_id, user_collateral, user_borrowed]
+                         0-1. factory_id, controller_id are needed to check that msg.sender is the one of our controllers
+                         2. user_collateral - the amount of collateral token provided by user (needs to be exchanged for borrowed)
+                         3. user_borrowed - the amount of borrowed token to repay from user's wallet
+    return [user_borrowed + borrowed_from_collateral, remaining_collateral]
+    """
+    controller: address = Factory(self.FACTORIES[callback_args[0]]).controllers(callback_args[1])
+    assert msg.sender == controller, "wrong controller"
+    amm: LLAMMA = LLAMMA(Controller(controller).amm())
+    borrowed_token: address = amm.coins(0)
+    collateral_token: address = amm.coins(1)
+
+    self._approve(collateral_token, ROUTER_1INCH)
+    self._approve(borrowed_token, controller)
+    self._approve(collateral_token, controller)
+
+    initial_collateral: uint256 = ERC20(collateral_token).balanceOf(self)
+    _callback_bytes: Bytes[10**4] = b""
+    if callback_bytes == b"":
+        success: bool = False
+        success, _callback_bytes = raw_call(
+            user,
+            method_id("callback_bytes()"),
+            max_outsize=10**4,
+            is_static_call=True,
+            revert_on_failure=False
+        )
+        _callback_bytes = _abi_decode(_callback_bytes, Bytes[10 ** 4 - 80])
+        if not success:
+            _callback_bytes = b""
+    else:
+        _callback_bytes = callback_bytes
+    if _callback_bytes != b"" and initial_collateral > 0:
+        # Buys borrowed token for collateral from user's position + from user's wallet.
+        # The amount to be spent is specified inside callback_bytes.
+        raw_call(ROUTER_1INCH, _callback_bytes)
+    remaining_collateral: uint256 = ERC20(collateral_token).balanceOf(self)
+    state_collateral_used: uint256 = 0
+    borrowed_from_collateral: uint256 = ERC20(borrowed_token).balanceOf(self)  # here it's total borrowed_from_collateral
+    if remaining_collateral < initial_collateral:
+        state_collateral_used = unsafe_sub(initial_collateral, remaining_collateral)
+
+    log Liquidate(user, state_collateral_used, borrowed_from_collateral, 0, 0, 0, 0)
+    
+    return [borrowed_from_collateral, remaining_collateral]
